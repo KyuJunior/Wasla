@@ -1,7 +1,7 @@
 # Builds a signed release APK and publishes it as a GitHub release; the app picks it up via "check for updates".
 # Usage: bump versionCode/versionName in app/build.gradle.kts, commit, then:  .\release.ps1 "what changed"
 param([string]$Notes = "")
-$ErrorActionPreference = "Stop"
+# Not "Stop": Windows PowerShell treats any stderr from gradle/git as a fatal error; exit codes are checked instead.
 Set-Location $PSScriptRoot
 
 if (-not (Test-Path keystore.properties)) { throw "keystore.properties missing: the release key is required so updates install over the old version." }
@@ -24,4 +24,6 @@ $apk = "app/build/outputs/apk/release/Wasla-$tag.apk"
 Copy-Item app/build/outputs/apk/release/app-release.apk $apk -Force
 git tag $tag
 git push origin HEAD $tag
+if ($LASTEXITCODE -ne 0) { throw "git push failed." }
 gh release create $tag $apk --title "Wasla $version" --notes $Notes
+if ($LASTEXITCODE -ne 0) { throw "gh release create failed." }
