@@ -36,7 +36,9 @@ class MainActivity : Activity() {
     private var kind = "video"
     private var tab = "download"
     private var foundTitle = "مقطع جديد"
+    private var foundUrl = "" // the URL foundTitle belongs to
     private var draftUrl = ""
+    private var updateChecked = false
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             status.text = intent?.getStringExtra(DownloadService.EXTRA_MESSAGE) ?: ""
@@ -54,6 +56,7 @@ class MainActivity : Activity() {
         }
         makeUi()
         acceptShare(intent)
+        if (savedInstanceState == null) checkForUpdate(silent = true)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -111,7 +114,7 @@ class MainActivity : Activity() {
         root.addView(link, LinearLayout.LayoutParams(-1, dp(55)))
         root.addView(space(12))
         root.addView(button("فحص الرابط", false) { inspect() }, LinearLayout.LayoutParams(-1, dp(48)))
-        titleView = text(if (foundTitle == "مقطع جديد") "" else foundTitle, 15, Color.WHITE, true).apply { setPadding(0, dp(15), 0, dp(12)) }
+        titleView = text(if (foundUrl.isEmpty() || foundUrl != draftUrl.trim()) "" else foundTitle, 15, Color.WHITE, true).apply { setPadding(0, dp(15), 0, dp(12)) }
         root.addView(titleView)
         root.addView(text("نوع الملف", 17, Color.WHITE, true))
         val options = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, dp(10)) }
@@ -137,6 +140,53 @@ class MainActivity : Activity() {
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(list)
         renderLibrary()
+        root.addView(space(28))
+        root.addView(button("التحقق من التحديثات (الإصدار ${Updater.currentVersion(this)})", false) { checkForUpdate(silent = false) },
+            LinearLayout.LayoutParams(-1, dp(46)))
+    }
+
+    private fun checkForUpdate(silent: Boolean) {
+        if (silent && updateChecked) return
+        updateChecked = true
+        if (!silent) status.text = "جاري التحقق من التحديثات..."
+        Thread {
+            try {
+                val release = Updater.latest()
+                val current = Updater.currentVersion(this)
+                runOnUiThread {
+                    if (isFinishing) return@runOnUiThread
+                    when {
+                        release != null && Updater.isNewer(release.version, current) -> offerUpdate(release)
+                        !silent -> status.text = "أنت تستخدم أحدث إصدار ($current)"
+                    }
+                }
+            } catch (e: Exception) {
+                if (!silent) runOnUiThread { status.text = "تعذّر التحقق من التحديثات: ${e.message ?: "تحقق من الإنترنت"}" }
+            }
+        }.start()
+    }
+
+    private fun offerUpdate(release: Updater.Release) {
+        AlertDialog.Builder(this)
+            .setTitle("إصدار جديد: ${release.version}")
+            .setMessage(release.notes.ifBlank { "يتوفر إصدار أحدث من وصلة." }.take(1500))
+            .setPositiveButton("تحديث") { _, _ -> installUpdate(release) }
+            .setNegativeButton("لاحقاً", null)
+            .show()
+    }
+
+    private fun installUpdate(release: Updater.Release) {
+        if (::status.isInitialized) status.text = "جاري تنزيل التحديث..."
+        Thread {
+            try {
+                Updater.downloadAndInstall(this, release) { percent ->
+                    runOnUiThread { if (::status.isInitialized) status.text = "جاري تنزيل التحديث: $percent٪" }
+                }
+                runOnUiThread { if (::status.isInitialized) status.text = "اتبع خطوات التثبيت على الشاشة" }
+            } catch (e: Exception) {
+                runOnUiThread { if (::status.isInitialized) status.text = "تعذّر تنزيل التحديث: ${e.message ?: "حاول مجدداً"}" }
+            }
+        }.start()
     }
 
     private fun renderShelf() {
@@ -176,14 +226,22 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun inspect() {
+    private fun inspect(thenDownload: Boolean = false) {
         val url = validUrl(link.text.toString()) ?: run { status.text = "ضع رابط يوتيوب صحيح"; return }
         status.text = "جاري تحديث أداة التنزيل وفحص الرابط..."
         Thread {
             try {
                 ExtractorSetup.ensureCurrent(this)
                 val info = YoutubeDL.getInstance().getInfo(url)
-                runOnUiThread { foundTitle = info.title ?: "مقطع جديد"; titleView.text = foundTitle; status.text = "اختر النوع والجودة ثم ابدأ التنزيل" }
+                runOnUiThread {
+                    foundUrl = url
+                    foundTitle = info.title ?: "مقطع جديد"
+                    // Only show the title if the field still holds the URL we inspected.
+                    if (validUrl(link.text.toString()) == url) {
+                        titleView.text = foundTitle
+                        if (thenDownload) download() else status.text = "اختر النوع والجودة ثم ابدأ التنزيل"
+                    }
+                }
             } catch (e: Exception) {
                 runOnUiThread { status.text = "تعذّر فحص الرابط: ${e.message ?: "حاول مجدداً"}" }
             }
@@ -192,6 +250,7 @@ class MainActivity : Activity() {
 
     private fun download() {
         val url = validUrl(link.text.toString()) ?: run { status.text = "ضع رابط يوتيوب صحيح"; return }
+        if (url != foundUrl) { inspect(thenDownload = true); return }
         val selected = if (kind == "video") listOf("best", "1080", "720", "480", "360")[quality.selectedItemPosition] else listOf("192", "128", "64")[quality.selectedItemPosition]
         val command = Intent(this, DownloadService::class.java).putExtra("url", url)
             .putExtra("kind", kind).putExtra("quality", selected).putExtra("title", foundTitle)
@@ -208,7 +267,6 @@ class MainActivity : Activity() {
         if (validUrl(url) == null) return
         tab = "download"
         draftUrl = url
-        foundTitle = "مقطع جديد"
         makeUi()
         inspect()
     }

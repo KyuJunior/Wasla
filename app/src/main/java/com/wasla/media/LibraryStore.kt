@@ -32,11 +32,12 @@ object LibraryStore {
     @Synchronized fun move(context: Context, id: String, direction: Int) {
         val items = all(context)
         val from = items.indexOfFirst { it.id == id }
-        val to = from + direction
-        if (from >= 0 && to in items.indices && items[from].kind == items[to].kind) {
-            java.util.Collections.swap(items, from, to)
-            save(context, items)
-        }
+        if (from < 0) return
+        // Swap with the nearest item of the same kind, skipping items of other kinds in between.
+        val sameKind = items.indices.filter { items[it].kind == items[from].kind }
+        val to = sameKind.getOrNull(sameKind.indexOf(from) + direction) ?: return
+        java.util.Collections.swap(items, from, to)
+        save(context, items)
     }
 
     @Synchronized fun remove(context: Context, id: String) {

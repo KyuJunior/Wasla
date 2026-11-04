@@ -3,3 +3,7 @@
 local.properties
 **/build/
 .kotlin/
+keystore.properties
+*.jks
+*.keystore
+graphify-out/

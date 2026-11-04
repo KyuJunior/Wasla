@@ -1,6 +1,7 @@
 package com.wasla.media
 
 import android.content.Context
+import android.util.Log
 import com.yausername.youtubedl_android.YoutubeDL
 
 object ExtractorSetup {
@@ -14,8 +15,13 @@ object ExtractorSetup {
         val now = System.currentTimeMillis()
         val last = prefs.getLong("last_update_check", 0L)
         if (last == 0L || now < last || now - last >= CHECK_INTERVAL) {
-            downloader.updateYoutubeDL(app, YoutubeDL.UpdateChannel.STABLE)
-            prefs.edit().putLong("last_update_check", now).apply()
+            // A failed self-update must not block downloads: the bundled yt-dlp usually still works.
+            try {
+                downloader.updateYoutubeDL(app, YoutubeDL.UpdateChannel.STABLE)
+                prefs.edit().putLong("last_update_check", now).apply()
+            } catch (e: Exception) {
+                Log.w("Wasla", "yt-dlp update failed, using current version", e)
+            }
         }
     }
 }
