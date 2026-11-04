@@ -1,0 +1,5 @@
+# Ahead-of-time compile the app's own code (startup, UI building, library, download, player).
+# shortcut: hand-written wildcard rules, not a generated profile; generate one with the baselineprofile
+# plugin on a real arm64 device if startup still feels slow.
+HSPLcom/wasla/media/**;->**(**)**
+Lcom/wasla/media/**;

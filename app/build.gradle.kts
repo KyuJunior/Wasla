@@ -18,9 +18,10 @@ android {
         applicationId = "com.wasla.media"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2"
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+        versionCode = 4
+        versionName = "1.3"
+        // 64-bit ARM only: the bundled Python/FFmpeg are ~50 MB per ABI. Drops 32-bit phones and x86 emulators.
+        ndk { abiFilters += listOf("arm64-v8a") }
     }
     signingConfigs {
         if (keystoreProps.isNotEmpty()) create("release") {
@@ -32,7 +33,9 @@ android {
     }
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release")
         }
     }
@@ -51,5 +54,7 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
+    // Applies baseline profiles (ours + Media3's) on sideloaded installs, not just Play installs.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     testImplementation("junit:junit:4.13.2")
 }
