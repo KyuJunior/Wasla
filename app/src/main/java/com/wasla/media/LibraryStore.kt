@@ -1,12 +1,33 @@
 package com.wasla.media
 
 import android.content.Context
+import android.net.Uri
+import android.provider.BaseColumns
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-data class SavedMedia(val id: String, val title: String, val kind: String, val fileName: String) {
-    fun file(context: Context): File = File(LibraryStore.mediaDir(context), fileName)
+/**
+ * location: a content:// URI (MediaStore, Android 10+), a file:// URI (public folder, Android 8-9),
+ * or a bare file name inside [LibraryStore.mediaDir] (entries saved before 1.4, or storage permission denied).
+ */
+data class SavedMedia(val id: String, val title: String, val kind: String, val location: String) {
+    fun uri(context: Context): Uri =
+        if ("://" in location) Uri.parse(location) else Uri.fromFile(File(LibraryStore.mediaDir(context), location))
+
+    fun exists(context: Context): Boolean {
+        val uri = uri(context)
+        if (uri.scheme == "file") return File(uri.path ?: return false).isFile
+        return runCatching {
+            context.contentResolver.query(uri, arrayOf(BaseColumns._ID), null, null, null)?.use { it.count > 0 } ?: false
+        }.getOrDefault(false)
+    }
+
+    fun delete(context: Context) {
+        val uri = uri(context)
+        if (uri.scheme == "file") File(uri.path ?: return).delete()
+        else runCatching { context.contentResolver.delete(uri, null, null) }
+    }
 }
 
 object LibraryStore {
@@ -18,9 +39,10 @@ object LibraryStore {
         return (0 until raw.length()).mapNotNull { n ->
             runCatching {
                 val item = raw.getJSONObject(n)
-                SavedMedia(item.getString("id"), item.getString("title"), item.getString("kind"), item.getString("fileName"))
+                SavedMedia(item.getString("id"), item.getString("title"), item.getString("kind"),
+                    item.optString("location").ifEmpty { item.getString("fileName") })
             }.getOrNull()
-        }.filter { it.file(context).isFile }.toMutableList()
+        }.filter { it.exists(context) }.toMutableList()
     }
 
     @Synchronized fun add(context: Context, item: SavedMedia) {
@@ -42,7 +64,7 @@ object LibraryStore {
 
     @Synchronized fun remove(context: Context, id: String) {
         val items = all(context)
-        items.find { it.id == id }?.file(context)?.delete()
+        items.find { it.id == id }?.delete(context)
         items.removeAll { it.id == id }
         save(context, items)
     }
@@ -51,7 +73,7 @@ object LibraryStore {
         val array = JSONArray()
         items.forEach { item ->
             array.put(JSONObject().put("id", item.id).put("title", item.title)
-                .put("kind", item.kind).put("fileName", item.fileName))
+                .put("kind", item.kind).put("location", item.location))
         }
         val tmp = File(context.filesDir, "library.tmp")
         tmp.writeText(array.toString())

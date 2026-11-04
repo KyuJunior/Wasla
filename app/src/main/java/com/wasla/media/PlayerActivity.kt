@@ -16,6 +16,7 @@ import androidx.core.view.WindowInsetsCompat
 class PlayerActivity : Activity() {
     private var player: ExoPlayer? = null
 
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class) // controllerAutoShow
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.rgb(14, 18, 28)
@@ -60,7 +61,7 @@ class PlayerActivity : Activity() {
         }
         setContentView(layout)
         player = ExoPlayer.Builder(this).build().also { exo ->
-            exo.setMediaItems(queue.map { MediaItem.fromUri(it.file(this).toURI().toString()) }, start, 0L)
+            exo.setMediaItems(queue.map { MediaItem.fromUri(it.uri(this)) }, start, 0L)
             view.player = exo
             exo.prepare()
             exo.playWhenReady = true

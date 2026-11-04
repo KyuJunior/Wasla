@@ -39,10 +39,14 @@ class MainActivity : Activity() {
     private var foundUrl = "" // the URL foundTitle belongs to
     private var draftUrl = ""
     private var updateChecked = false
+    private var queueTab: TextView? = null
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            status.text = intent?.getStringExtra(DownloadService.EXTRA_MESSAGE) ?: ""
-            renderLibrary()
+            val message = intent?.getStringExtra(DownloadService.EXTRA_MESSAGE)
+            if (message != null && ::status.isInitialized) status.text = message
+            queueTab?.text = queueLabel()
+            if (tab == "queue") renderQueue()
+            else if (intent?.getBooleanExtra(DownloadService.EXTRA_LIBRARY_CHANGED, false) == true) renderLibrary()
         }
     }
 
@@ -56,6 +60,7 @@ class MainActivity : Activity() {
         }
         makeUi()
         acceptShare(intent)
+        openTab(intent)
         if (savedInstanceState == null) checkForUpdate(silent = true)
     }
 
@@ -63,13 +68,26 @@ class MainActivity : Activity() {
         super.onNewIntent(intent)
         setIntent(intent)
         acceptShare(intent)
+        openTab(intent)
     }
 
     override fun onStart() {
         super.onStart()
         ContextCompat.registerReceiver(this, receiver, IntentFilter(DownloadService.ACTION_STATUS), ContextCompat.RECEIVER_NOT_EXPORTED)
-        if (::list.isInitialized) renderLibrary()
+        queueTab?.text = queueLabel()
+        if (tab == "queue") renderQueue() else renderLibrary()
     }
+
+    /** The download notification opens the app on the "قيد التنزيل" tab. */
+    private fun openTab(intent: Intent?) {
+        val target = intent?.getStringExtra("tab") ?: return
+        intent.removeExtra("tab")
+        saveDraft()
+        tab = target
+        makeUi()
+    }
+
+    private fun queueLabel() = Downloads.activeCount().let { if (it > 0) "قيد التنزيل ($it)" else "قيد التنزيل" }
 
     override fun onStop() {
         unregisterReceiver(receiver)
@@ -89,12 +107,66 @@ class MainActivity : Activity() {
         root.addView(text("وصلة", 33, Color.WHITE, true))
         root.addView(text("نزّل ما تملك حق حفظه واستمع إليه بطريقتك", 14, soft, false).apply { setPadding(0, dp(3), 0, dp(26)) })
         val tabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        listOf("download" to "تحميل", "audio" to "الصوتيات", "video" to "الفيديوهات").forEach { (key, label) ->
-            tabs.addView(button(label, key == tab) { saveDraft(); tab = key; makeUi() }, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginEnd = dp(7) })
+        listOf("download" to "تحميل", "queue" to queueLabel(), "audio" to "الصوتيات", "video" to "الفيديوهات").forEach { (key, label) ->
+            val tabButton = button(label, key == tab) { saveDraft(); tab = key; makeUi() }.apply { textSize = 12f; setPadding(dp(2), 0, dp(2), 0) }
+            if (key == "queue") queueTab = tabButton
+            tabs.addView(tabButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginEnd = dp(6) })
         }
         root.addView(tabs)
         root.addView(space(20))
-        if (tab == "download") renderDownload() else renderShelf()
+        when (tab) {
+            "download" -> renderDownload()
+            "queue" -> renderQueuePage()
+            else -> renderShelf()
+        }
+    }
+
+    private fun renderQueuePage() {
+        root.addView(text("قيد التنزيل", 23, Color.WHITE, true))
+        root.addView(text("الملفات التي تُنزَّل الآن أو تنتظر دورها.", 14, soft, false).apply { setPadding(0, dp(8), 0, dp(20)) })
+        list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(list)
+        renderQueue()
+    }
+
+    private fun renderQueue() {
+        if (!::list.isInitialized || tab != "queue") return
+        list.removeAllViews()
+        val jobs = Downloads.jobs.toList().asReversed()
+        if (jobs.isEmpty()) {
+            list.addView(text("لا توجد تنزيلات حالياً", 14, soft, false).apply { setPadding(0, dp(20), 0, 0) })
+            return
+        }
+        if (jobs.any { !it.active }) {
+            list.addView(button("مسح المنتهية", false) { Downloads.clearFinished(); renderQueue() },
+                LinearLayout.LayoutParams(-1, dp(42)))
+        }
+        jobs.forEach { job ->
+            val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = rounded(card); setPadding(dp(15), dp(13), dp(15), dp(13)) }
+            box.addView(text(job.title, 15, Color.WHITE, true))
+            val kindLabel = if (job.kind == "audio") "صوت" else "فيديو"
+            val state = when (job.state) {
+                DownloadJob.State.QUEUED -> "في الانتظار"
+                DownloadJob.State.RUNNING -> "جاري التنزيل: ${job.percent}٪"
+                DownloadJob.State.DONE -> "اكتمل وحُفظ في الهاتف"
+                DownloadJob.State.FAILED -> job.message
+                DownloadJob.State.CANCELED -> "أُلغي"
+            }
+            box.addView(text("$kindLabel · $state", 12, soft, false).apply { setPadding(0, dp(4), 0, 0) })
+            if (job.state == DownloadJob.State.RUNNING) {
+                box.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                    max = 100; progress = job.percent; isIndeterminate = job.percent == 0
+                    progressTintList = android.content.res.ColorStateList.valueOf(accent)
+                }, LinearLayout.LayoutParams(-1, dp(14)).apply { topMargin = dp(8) })
+            }
+            if (job.active) {
+                box.addView(button("إلغاء", false) {
+                    ContextCompat.startForegroundService(this, Intent(this, DownloadService::class.java)
+                        .setAction(DownloadService.ACTION_CANCEL).putExtra(DownloadService.EXTRA_ID, job.id))
+                }, LinearLayout.LayoutParams(-1, dp(40)).apply { topMargin = dp(10) })
+            }
+            list.addView(box, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        }
     }
 
     private fun renderDownload() {
@@ -199,7 +271,7 @@ class MainActivity : Activity() {
     }
 
     private fun renderLibrary() {
-        if (!::list.isInitialized) return
+        if (!::list.isInitialized || tab == "queue") return
         list.removeAllViews()
         val items = LibraryStore.all(this).filter { tab == "download" || it.kind == tab }.let { if (tab == "download") it.take(4) else it }
         if (items.isEmpty()) {
@@ -217,7 +289,7 @@ class MainActivity : Activity() {
                 actions.addView(button("↓", false) { LibraryStore.move(this, item.id, 1); renderLibrary() }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginEnd = dp(7) })
             }
             actions.addView(button("حذف", false) {
-                AlertDialog.Builder(this).setMessage("حذف هذا المقطع من التطبيق؟")
+                AlertDialog.Builder(this).setMessage("حذف هذا المقطع من الهاتف؟")
                     .setPositiveButton("حذف") { _, _ -> LibraryStore.remove(this, item.id); renderLibrary() }
                     .setNegativeButton("إلغاء", null).show()
             }, LinearLayout.LayoutParams(0, dp(40), 1f))
@@ -255,8 +327,12 @@ class MainActivity : Activity() {
         val command = Intent(this, DownloadService::class.java).putExtra("url", url)
             .putExtra("kind", kind).putExtra("quality", selected).putExtra("title", foundTitle)
         try {
+            // Android 8-9 need this to save into the public Music/Movies folders.
+            if (Build.VERSION.SDK_INT < 29 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 2)
+            }
             ContextCompat.startForegroundService(this, command)
-            status.text = "بدأ التنزيل؛ يمكنك متابعة التقدم من الإشعار"
+            status.text = "أضيف إلى قائمة التنزيل؛ تابع التقدم من تبويب «قيد التنزيل»"
         } catch (e: Exception) { status.text = "تعذّر بدء التنزيل: ${e.message}" }
     }
 

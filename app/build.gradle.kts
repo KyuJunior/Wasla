@@ -18,8 +18,8 @@ android {
         applicationId = "com.wasla.media"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
         // 64-bit ARM only: the bundled Python/FFmpeg are ~50 MB per ABI. Drops 32-bit phones and x86 emulators.
         ndk { abiFilters += listOf("arm64-v8a") }
     }
